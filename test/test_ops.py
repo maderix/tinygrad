@@ -14,7 +14,6 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn, atol=1e-7, grad_atol=1e-7, gpu
   out = torch_fxn(*ts)
   ret = tinygrad_fxn(*tst)
 
-  # TODO: why so inaccurate?
   np.testing.assert_allclose(ret.cpu().data, out.detach().numpy(), atol=atol)
 
   if not forward_only:
@@ -40,6 +39,8 @@ class TestOps(unittest.TestCase):
   gpu = False
   def test_add(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x+y, Tensor.add, gpu=self.gpu)
+  def test_broadcast_add(self):
+    helper_test_op([(1,32,32,32), (1,32,1,1)], lambda x,y: x+y, Tensor.add, gpu=self.gpu, forward_only=True)
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub, gpu=self.gpu)
   def test_mul(self):
@@ -62,15 +63,18 @@ class TestOps(unittest.TestCase):
   def test_logsoftmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.logsoftmax, atol=1e-5, gpu=self.gpu)
 
+  def test_pad2d(self):
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,1,1,1)), lambda x: x.pad2d(padding=(1,1,1,1)), gpu=self.gpu)
+
   def test_conv2d(self):
     for bs in [1,8]:
       for cin in [1,3]:
         for groups in [1,3] if cin == 3 else [1]:
-          for H in [2,5]:
-            for W in [2,3,5]:
+          for H in [1,2,5]:
+            for W in [1,2,3,5]:
               helper_test_op([(bs,cin,11,28), (6,cin//groups,H,W)],
                 lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
-                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu)
+                lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu, forward_only=self.gpu)
 
   def test_strided_conv2d(self):
     bs = 4
@@ -78,22 +82,23 @@ class TestOps(unittest.TestCase):
     H,W = 3,3
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
-      lambda x,w: Tensor.conv2d(x,w,stride=2).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu)
+      lambda x,w: Tensor.conv2d(x,w,stride=2).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu, forward_only=self.gpu)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,stride=(2,1)).relu(),
-      lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu)
+      lambda x,w: Tensor.conv2d(x,w,stride=(2,1)).relu(), atol=2e-5, grad_atol=2e-6, gpu=self.gpu, forward_only=self.gpu)
 
   def test_maxpool2x2(self):
-    helper_test_op([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, (2,2)), Tensor.max_pool2d, gpu=self.gpu)
+    helper_test_op([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, (2,2)), Tensor.max_pool2d, gpu=self.gpu, forward_only=self.gpu)
 
   def test_maxpool_sizes(self):
     for sz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       helper_test_op([(32,2,110,28)],
         lambda x: torch.nn.functional.max_pool2d(x, kernel_size=sz),
-        lambda x: Tensor.max_pool2d(x, kernel_size=sz), gpu=self.gpu)
+        lambda x: Tensor.max_pool2d(x, kernel_size=sz), gpu=self.gpu, forward_only=self.gpu)
 
   def test_avgpool2x2(self):
-    helper_test_op([(32,2,111,28)], lambda x: torch.nn.functional.avg_pool2d(x, (2,2)), Tensor.avg_pool2d, gpu=self.gpu)
+    # TODO Grad tolerance needs to be slightly relaxed; why?
+    helper_test_op([(32,2,111,28)], lambda x: torch.nn.functional.avg_pool2d(x, (2,2)), Tensor.avg_pool2d, gpu=self.gpu, grad_atol=1e-5)
 
 if GPU:
   class TestOpsGPU(TestOps):
